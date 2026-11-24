@@ -45,4 +45,52 @@ interface DownloadedTrackDao {
 
     @Query("SELECT SUM(fileSizeBytes) FROM downloaded_tracks")
     fun totalBytes(): Flow<Long?>
+
+    @Query("SELECT * FROM downloaded_tracks ORDER BY title COLLATE NOCASE ASC")
+    fun getAllSortedByTitle(): Flow<List<DownloadedTrackEntity>>
+
+    @Query("SELECT * FROM downloaded_tracks ORDER BY artist COLLATE NOCASE ASC, title COLLATE NOCASE ASC")
+    fun getAllSortedByArtist(): Flow<List<DownloadedTrackEntity>>
+
+    @Query("SELECT * FROM downloaded_tracks ORDER BY downloadedAtMillis DESC")
+    fun getAllSortedByDateAdded(): Flow<List<DownloadedTrackEntity>>
+
+    @Query("SELECT * FROM downloaded_tracks ORDER BY fileSizeBytes DESC")
+    fun getAllSortedByFileSize(): Flow<List<DownloadedTrackEntity>>
+
+    @Query("SELECT * FROM downloaded_tracks ORDER BY durationMs DESC")
+    fun getAllSortedByDuration(): Flow<List<DownloadedTrackEntity>>
+
+    @Query(
+        """
+        SELECT * FROM downloaded_tracks
+        WHERE title LIKE :prefix || '%' COLLATE NOCASE
+           OR artist LIKE :prefix || '%' COLLATE NOCASE
+           OR album LIKE :prefix || '%' COLLATE NOCASE
+        ORDER BY title COLLATE NOCASE ASC
+        """
+    )
+    fun searchByPrefix(prefix: String): Flow<List<DownloadedTrackEntity>>
+
+    @Query(
+        """
+        SELECT * FROM downloaded_tracks
+        WHERE title LIKE '%' || :query || '%' COLLATE NOCASE
+           OR artist LIKE '%' || :query || '%' COLLATE NOCASE
+           OR album LIKE '%' || :query || '%' COLLATE NOCASE
+        ORDER BY title COLLATE NOCASE ASC
+        """
+    )
+    fun searchAll(query: String): Flow<List<DownloadedTrackEntity>>
+
+    @Query(
+        """
+        SELECT COUNT(*) FROM downloaded_tracks
+        WHERE trackKey IS NULL OR TRIM(trackKey) = ''
+           OR title IS NULL OR TRIM(title) = ''
+           OR artist IS NULL OR TRIM(artist) = ''
+           OR filePath IS NULL OR TRIM(filePath) = ''
+        """
+    )
+    suspend fun countRowsMissingIndexedFields(): Int
 }

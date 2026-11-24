@@ -260,6 +260,15 @@ object DatabaseModule {
         }
     }
 
+    private val migration13To14 = object : Migration(13, 14) {
+        override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+            database.execSQL("CREATE INDEX IF NOT EXISTS index_downloaded_tracks_title ON downloaded_tracks(title)")
+            database.execSQL("CREATE INDEX IF NOT EXISTS index_downloaded_tracks_artist ON downloaded_tracks(artist)")
+            database.execSQL("CREATE INDEX IF NOT EXISTS index_downloaded_tracks_album ON downloaded_tracks(album)")
+            database.execSQL("CREATE INDEX IF NOT EXISTS index_downloaded_tracks_filePath ON downloaded_tracks(filePath)")
+        }
+    }
+
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
@@ -279,6 +288,7 @@ object DatabaseModule {
                 migration10To11,
                 migration11To12,
                 migration12To13,
+                migration13To14,
             )
             .build()
 

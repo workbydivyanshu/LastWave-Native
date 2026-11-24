@@ -6,7 +6,13 @@ import androidx.room.PrimaryKey
 
 @Entity(
     tableName = "downloaded_tracks",
-    indices = [Index(value = ["trackKey"], unique = true)],
+    indices = [
+        Index(value = ["trackKey"], unique = true),
+        Index(value = ["title"]),
+        Index(value = ["artist"]),
+        Index(value = ["album"]),
+        Index(value = ["filePath"]),
+    ],
 )
 data class DownloadedTrackEntity(
     @PrimaryKey(autoGenerate = true)
