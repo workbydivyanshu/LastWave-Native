@@ -3,15 +3,14 @@ package com.lastwave.app.ui.search
 import androidx.compose.runtime.Immutable
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import com.lastwave.app.data.local.db.DownloadedTrackDao
+import com.lastwave.app.data.local.db.DownloadedTrackEntity
 import com.lastwave.app.data.search.SearchHistoryRepository
-import com.lastwave.app.data.search.SearchRepository
 import com.lastwave.app.data.search.SearchResultItem
-import com.lastwave.app.data.search.SearchTab
 import com.lastwave.app.playback.MusicPlayer
-import com.lastwave.app.playback.PlayableTrack
+import com.lastwave.app.ui.settings.toPlayableTrack
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -24,21 +23,22 @@ enum class SearchStatus { IDLE, LOADING, EMPTY, RESULTS }
 @Immutable
 data class SearchUiState(
     val query: String = "",
-    val tab: SearchTab = SearchTab.TRACKS,
     val status: SearchStatus = SearchStatus.IDLE,
-    val results: List<SearchResultItem> = emptyList(),
-    val suggestions: List<String> = emptyList(),
+    val results: LocalSearchResults = LocalSearchResults(),
     val recentSearches: List<String> = emptyList(),
-    val isShowingSuggestions: Boolean = false,
+    val tracks: List<DownloadedTrackEntity> = emptyList(),
 )
 
 /**
- * YouTube Music & Last.fm search with live auto-complete suggestions,
- * persistent search history, debounced search, and multi-tab results.
+ * LOCAL-ONLY search over the on-device library.
+ *
+ * There is no network repository and no debounce: every keystroke launches a
+ * fresh Room query whose emissions are grouped by [LocalSearch]. Playback is
+ * served entirely from the local [DownloadedTrackEntity] snapshot.
  */
 @HiltViewModel
 class SearchViewModel @Inject constructor(
-    private val repository: SearchRepository,
+    private val dao: DownloadedTrackDao,
     private val historyRepository: SearchHistoryRepository,
     private val musicPlayer: MusicPlayer,
 ) : ViewModel() {
@@ -46,10 +46,8 @@ class SearchViewModel @Inject constructor(
     private val _uiState = MutableStateFlow(SearchUiState())
     val uiState: StateFlow<SearchUiState> = _uiState.asStateFlow()
 
-    private var debounceJob: Job? = null
-    private var suggestionsJob: Job? = null
-    private var searchQueueJob: Job? = null
-    private var lastIssuedQuery: String = ""
+    private var searchJob: Job? = null
+    private var searchGeneration = 0
 
     init {
         viewModelScope.launch {
@@ -57,56 +55,39 @@ class SearchViewModel @Inject constructor(
                 _uiState.update { it.copy(recentSearches = history) }
             }
         }
+        // Keep a full-library snapshot for local playback of any result.
+        viewModelScope.launch {
+            dao.getAll().collect { snapshot ->
+                _uiState.update { it.copy(tracks = snapshot) }
+            }
+        }
     }
 
+    /** Instant local search: no network, no debounce. Cancels the prior job. */
     fun setQuery(query: String) {
-        _uiState.update { it.copy(query = query, isShowingSuggestions = query.isNotBlank()) }
-        debounceJob?.cancel()
-        suggestionsJob?.cancel()
+        _uiState.update { it.copy(query = query) }
+        searchJob?.cancel()
+        val generation = ++searchGeneration
 
         if (query.isBlank()) {
             _uiState.update {
-                it.copy(
-                    status = SearchStatus.IDLE,
-                    results = emptyList(),
-                    suggestions = emptyList(),
-                    isShowingSuggestions = false,
-                )
+                it.copy(status = SearchStatus.IDLE, results = LocalSearchResults())
             }
             return
         }
 
-        // Fast suggestions debounce (120ms)
-        suggestionsJob = viewModelScope.launch {
-            delay(120)
-            val suggestions = repository.getSuggestions(query)
-            if (_uiState.value.query == query) {
-                _uiState.update { it.copy(suggestions = suggestions) }
+        _uiState.update { it.copy(status = SearchStatus.LOADING) }
+        searchJob = viewModelScope.launch {
+            dao.searchAll(query).collect { rows ->
+                if (generation != searchGeneration) return@collect
+                val grouped = LocalSearch.group(rows, query)
+                _uiState.update {
+                    it.copy(
+                        results = grouped,
+                        status = if (grouped.isEmpty) SearchStatus.EMPTY else SearchStatus.RESULTS,
+                    )
+                }
             }
-        }
-
-        // Full search results debounce (400ms)
-        debounceJob = viewModelScope.launch {
-            delay(400)
-            runSearch(query, saveToHistory = false)
-        }
-    }
-
-    fun setTab(tab: SearchTab) {
-        if (_uiState.value.tab == tab) return
-        _uiState.update {
-            it.copy(
-                tab = tab,
-                isShowingSuggestions = false,
-                results = emptyList(),
-                status = if (it.query.isBlank()) SearchStatus.IDLE else SearchStatus.LOADING,
-            )
-        }
-        val q = _uiState.value.query
-        if (q.isNotBlank()) {
-            debounceJob?.cancel()
-            suggestionsJob?.cancel()
-            viewModelScope.launch { runSearch(q, saveToHistory = false) }
         }
     }
 
@@ -119,16 +100,49 @@ class SearchViewModel @Inject constructor(
     fun executeSearch(query: String) {
         val trimmed = query.trim()
         if (trimmed.isBlank()) return
-        debounceJob?.cancel()
-        suggestionsJob?.cancel()
         historyRepository.add(trimmed)
-        _uiState.update {
-            it.copy(
-                query = trimmed,
-                isShowingSuggestions = false,
-            )
+        setQuery(trimmed)
+    }
+
+    fun playResult(item: SearchResultItem) {
+        val snapshot = _uiState.value.tracks
+        val entityId = item.entityId
+
+        // Track rows carry entityId = filePath.
+        if (entityId != null &&
+            !entityId.startsWith("artist:") &&
+            !entityId.startsWith("album:")
+        ) {
+            val track = snapshot.firstOrNull { it.filePath == entityId }
+                ?: snapshot.firstOrNull {
+                    it.title.equals(item.name, ignoreCase = true) &&
+                        it.artist.equals(item.artist, ignoreCase = true)
+                }
+            if (track != null) {
+                musicPlayer.play(track.toPlayableTrack(), sourceLabel = "Search")
+            }
+            return
         }
-        viewModelScope.launch { runSearch(trimmed, saveToHistory = true) }
+
+        val queue = when {
+            entityId?.startsWith("artist:") == true -> {
+                val name = entityId.removePrefix("artist:")
+                snapshot.filter { it.artist.equals(name, ignoreCase = true) }
+            }
+            entityId?.startsWith("album:") == true -> {
+                val parts = entityId.removePrefix("album:").split("|", limit = 2)
+                val albumTitle = parts.getOrElse(0) { item.name }
+                val albumArtist = parts.getOrElse(1) { item.artist.orEmpty() }
+                snapshot.filter {
+                    it.album.equals(albumTitle, ignoreCase = true) &&
+                        it.artist.equals(albumArtist, ignoreCase = true)
+                }
+            }
+            else -> emptyList()
+        }
+        if (queue.isNotEmpty()) {
+            musicPlayer.playQueue(queue.map { it.toPlayableTrack() }, sourceLabel = "Search")
+        }
     }
 
     fun removeRecentSearch(query: String) {
@@ -139,79 +153,11 @@ class SearchViewModel @Inject constructor(
         historyRepository.clear()
     }
 
-    fun dismissSuggestions() {
-        _uiState.update { it.copy(isShowingSuggestions = false) }
-    }
-
-    fun playResult(item: SearchResultItem) {
-        searchQueueJob?.cancel()
-        val tab = _uiState.value.tab
-        when (tab) {
-            SearchTab.TRACKS -> {
-                val selected = PlayableTrack(
-                    title = item.name,
-                    artist = item.artist.orEmpty(),
-                    album = item.subtitle,
-                    artworkUrl = item.artworkUrl,
-                    videoId = item.videoId,
-                )
-                // Start immediately. Similar song radio queue loads and extends infinitely.
-                musicPlayer.play(selected, sourceLabel = "Search", startRadio = true)
-            }
-            SearchTab.ARTISTS, SearchTab.ALBUMS -> viewModelScope.launch {
-                val tracks = runCatching { repository.songsFor(item) }.getOrDefault(emptyList())
-                if (tracks.isNotEmpty()) {
-                    musicPlayer.playQueue(tracks.map { track ->
-                        PlayableTrack(
-                            title = track.title,
-                            artist = track.artist.takeUnless { it == "Unknown artist" } ?: item.artist ?: item.name,
-                            album = track.album ?: if (tab == SearchTab.ALBUMS) item.name else null,
-                            artworkUrl = track.artworkUrl ?: item.artworkUrl,
-                            videoId = track.videoId,
-                            durationMs = track.durationSeconds?.takeIf { it > 0 }?.times(1_000L),
-                        )
-                    }, sourceLabel = "Search")
-                }
-            }
-            SearchTab.PLAYLISTS, SearchTab.USERS -> Unit
-        }
-    }
-
-    private suspend fun runSearch(query: String, saveToHistory: Boolean) {
-        val tab = _uiState.value.tab
-        lastIssuedQuery = query
-        _uiState.update { it.copy(status = SearchStatus.LOADING) }
-        if (saveToHistory) {
-            historyRepository.add(query)
-        }
-        try {
-            val results = repository.search(tab, query)
-            // Stale-response guard: discard if the user has typed something
-            // new since this call was issued.
-            if (lastIssuedQuery != query || _uiState.value.query != query || _uiState.value.tab != tab) return
-            _uiState.update {
-                it.copy(
-                    status = if (results.isEmpty()) SearchStatus.EMPTY else SearchStatus.RESULTS,
-                    results = results,
-                )
-            }
-        } catch (e: Exception) {
-            if (lastIssuedQuery != query || _uiState.value.query != query || _uiState.value.tab != tab) return
-            _uiState.update { it.copy(status = SearchStatus.EMPTY, results = emptyList()) }
-        }
-    }
-
     fun clearQuery() {
-        debounceJob?.cancel()
-        suggestionsJob?.cancel()
+        searchJob?.cancel()
+        searchGeneration++
         _uiState.update {
-            it.copy(
-                query = "",
-                status = SearchStatus.IDLE,
-                results = emptyList(),
-                suggestions = emptyList(),
-                isShowingSuggestions = false,
-            )
+            it.copy(query = "", status = SearchStatus.IDLE, results = LocalSearchResults())
         }
     }
 }

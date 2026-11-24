@@ -48,8 +48,8 @@ import androidx.compose.material.icons.automirrored.filled.QueueMusic
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDownload
-import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Leaderboard
+import androidx.compose.material.icons.filled.LibraryMusic
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
@@ -113,8 +113,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.ui.common.ExpressiveMotion
 import com.lastwave.app.ui.common.PredictiveBackScreen
 import com.lastwave.app.ui.common.adaptiveContentWidth
-import com.lastwave.app.ui.feed.FeedScreen
 import com.lastwave.app.ui.home.HomeScreen
+import com.lastwave.app.ui.library.LibraryScreen
 import com.lastwave.app.ui.player.LocalMiniPlayerScrollClearance
 import com.lastwave.app.ui.playlist.PlaylistScreen
 import androidx.compose.foundation.shape.CornerBasedShape
@@ -155,8 +155,8 @@ class MainShellViewModel @Inject constructor(
     }
 }
 
-private enum class MainTab(val labelRes: Int) {
-    FEED(com.lastwave.app.R.string.nav_feed),
+internal enum class MainTab(val labelRes: Int) {
+    LIBRARY(com.lastwave.app.R.string.nav_library),
     STATS(com.lastwave.app.R.string.nav_stats),
     PLAYLISTS(com.lastwave.app.R.string.nav_playlists),
 }
@@ -230,7 +230,7 @@ fun MainShell(
     val navGlass = isLiquidGlassBackdropSupported()
 
     Box(Modifier.fillMaxSize()) {
-        val feedIndex = tabs.indexOf(MainTab.FEED)
+        val libraryIndex = tabs.indexOf(MainTab.LIBRARY)
         HorizontalPager(
             state = pagerState,
             beyondViewportPageCount = 0,
@@ -238,20 +238,13 @@ fun MainShell(
         ) { page ->
             val isCurrent = page == pagerState.currentPage
             PredictiveBackScreen(
-                enabled = isCurrent && tabs[page] != MainTab.FEED,
-                onBack = { scope.launch { pagerState.animateScrollToPage(feedIndex) } },
+                enabled = isCurrent && tabs[page] != MainTab.LIBRARY,
+                onBack = { scope.launch { pagerState.animateScrollToPage(libraryIndex) } },
             ) {
                 when (tabs[page]) {
-                    MainTab.FEED -> FeedScreen(
+                    MainTab.LIBRARY -> LibraryScreen(
                         onOpenSettings = onOpenSettings,
                         onOpenSearch = onOpenSearch,
-                        onOpenDiscover = onOpenDiscover,
-                        onOpenPlaylist = onOpenPlaylist,
-                        onOpenFeedPlaylist = onOpenFeedPlaylist,
-                        onOpenGenerator = onOpenGenerator,
-                        onOpenFriends = onOpenFriends,
-                        onOpenFriendProfile = onOpenFriendProfile,
-                        onOpenNewReleases = onOpenNewReleases,
                         onOpenDownloads = onOpenDownloads,
                     )
                     MainTab.STATS -> HomeScreen(
@@ -616,7 +609,7 @@ private fun FloatingNavItem(
 }
 
 private fun MainTab.icon(): ImageVector = when (this) {
-    MainTab.FEED -> Icons.Filled.Home
+    MainTab.LIBRARY -> Icons.Filled.LibraryMusic
     MainTab.STATS -> Icons.Filled.Leaderboard
     MainTab.PLAYLISTS -> Icons.AutoMirrored.Filled.QueueMusic
 }
