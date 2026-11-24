@@ -66,6 +66,7 @@ import com.lastwave.app.data.plugin.ModuleDrmFactory
 import com.lastwave.app.data.plugin.SegmentedDashBridge
 import com.lastwave.app.data.plugin.stableCacheKey
 import com.lastwave.app.playback.usb.UsbExclusivePrefs
+import com.lastwave.app.ui.settings.toPlayableTrack
 import com.lastwave.app.widget.WidgetUpdater
 import kotlinx.coroutines.flow.first
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -1816,11 +1817,27 @@ class MusicPlayer @Inject constructor(
         playRequest = applicationScope.launch(Dispatchers.IO) {
             try {
                 val resolved = if (selectedTrack.playbackUrl == null) {
-                    resolveTrackAudioStreamWithRetry(
-                        track = selectedTrack,
-                        videoId = selectedTrack.videoId,
-                        allowLossless = selectedTrack.mediaIdKey() !in losslessBypassMediaIds,
-                    )
+                    // Local-first, no remote fallback: a missing local file is a
+                    // clean error, never a YouTube/network resolve.
+                    when (val decision = LocalPlaybackPolicy.resolve(
+                        local = { resolveLocalDownloadedAudioStream(selectedTrack) },
+                    )) {
+                        is LocalResolveResult.Found -> decision.stream
+                        LocalResolveResult.NotFound -> {
+                            onMain {
+                                if (generation == playRequestGeneration.get()) {
+                                    _state.update {
+                                        it.copy(
+                                            isPlaying = false,
+                                            isBuffering = false,
+                                            error = LocalPlaybackPolicy.MISSING_FILE_ERROR,
+                                        )
+                                    }
+                                }
+                            }
+                            return@launch
+                        }
+                    }
                 } else {
                     null
                 }
@@ -1881,56 +1898,6 @@ class MusicPlayer @Inject constructor(
                 currentCoroutineContext().ensureActive()
                 if (generation != playRequestGeneration.get()) return@launch
                 logResolutionFailure(selectedTrack, "resolve-before-prepare", 0, error)
-                if (selectedTrack.mediaIdKey() !in losslessBypassMediaIds) {
-                    losslessBypassMediaIds += selectedTrack.mediaIdKey()
-                    val ytFallback = try {
-                        resolveYoutubeTrackAudioStream(selectedTrack, selectedTrack.videoId)
-                    } catch (cancellation: CancellationException) {
-                        throw cancellation
-                    } catch (_: Throwable) {
-                        null
-                    }
-                    if (ytFallback != null && generation == playRequestGeneration.get()) {
-                        withContext(Dispatchers.Main.immediate) {
-                            if (generation != playRequestGeneration.get()) return@withContext
-                            val isShuffle = startShuffled || (playerDelegate.isInitialized() && player.shuffleModeEnabled)
-                            registerPreparedStream(ytFallback)
-                            stagePendingQuality(selectedTrack.mediaIdKey(), ytFallback)
-                            publishResolvedQuality(ytFallback, expectedMediaId = selectedTrack.mediaIdKey())
-                            cacheCurrentTrackStream(ytFallback)
-                            val mediaItems = tracks.mapIndexed { index, track ->
-                                track.toMediaItem(if (index == selectedIndex) ytFallback else null)
-                            }
-                            player.setMediaItems(mediaItems, selectedIndex, startPositionMs.coerceAtLeast(0L))
-                            if (isShuffle) {
-                                if (mediaItems.size > 1) {
-                                    val remaining = mediaItems.indices.filter { it != selectedIndex }.shuffled()
-                                    val order = (listOf(selectedIndex) + remaining).toIntArray()
-                                    player.setShuffleOrder(DefaultShuffleOrder(order, Random.nextLong()))
-                                }
-                                player.shuffleModeEnabled = true
-                            } else {
-                                player.shuffleModeEnabled = false
-                            }
-                            player.prepare()
-                            player.play()
-                            enrichUpcomingQueue(selectedIndex)
-                            if (endlessDiscover) {
-                                appendMissingDiscoverTracks(discoverRepository.getCachedFeed().map(GeneratedTrack::toPlayableTrack))
-                            }
-                            scheduleQualityUpgrade(
-                                track = selectedTrack,
-                                expectedMediaId = selectedTrack.mediaIdKey(),
-                                generation = generation,
-                                currentStream = ytFallback,
-                            )
-                            extendDiscoverQueueIfNeeded(selectedIndex)
-                            extendRadioQueueIfNeeded(selectedIndex)
-                            preloadNextQueueItem(selectedIndex)
-                        }
-                        return@launch
-                    }
-                }
                 withContext(Dispatchers.Main.immediate) {
                     if (generation == playRequestGeneration.get()) {
                         val failedKey = selectedTrack.mediaIdKey()
@@ -3487,11 +3454,22 @@ class MusicPlayer @Inject constructor(
         decodedSampleRateHz = 0
         playRequest = applicationScope.launch(Dispatchers.IO) {
             try {
-                val resolved = resolveTrackAudioStreamWithRetry(
-                    track = track,
-                    videoId = track.videoId,
-                    allowLossless = expectedMediaId !in losslessBypassMediaIds,
-                )
+                val localResolved = resolveLocalDownloadedAudioStream(track)
+                if (localResolved == null) {
+                    onMain {
+                        if (generation == playRequestGeneration.get()) {
+                            _state.update {
+                                it.copy(
+                                    isPlaying = false,
+                                    isBuffering = false,
+                                    error = LocalPlaybackPolicy.MISSING_FILE_ERROR,
+                                )
+                            }
+                        }
+                    }
+                    return@launch
+                }
+                val resolved = localResolved
                 currentCoroutineContext().ensureActive()
                 withContext(Dispatchers.Main.immediate) {
                     if (generation != playRequestGeneration.get() ||
@@ -3529,46 +3507,6 @@ class MusicPlayer @Inject constructor(
                 throw cancellation
             } catch (error: Throwable) {
                 logResolutionFailure(track, "queue-resolve", 0, error)
-                if (expectedMediaId !in losslessBypassMediaIds) {
-                    losslessBypassMediaIds += expectedMediaId
-                    val ytFallback = try {
-                        resolveYoutubeTrackAudioStream(track, track.videoId)
-                    } catch (cancellation: CancellationException) {
-                        throw cancellation
-                    } catch (_: Throwable) {
-                        null
-                    }
-                    if (ytFallback != null && generation == playRequestGeneration.get()) {
-                        withContext(Dispatchers.Main.immediate) {
-                            if (generation != playRequestGeneration.get() ||
-                                index !in 0 until player.mediaItemCount ||
-                                player.getMediaItemAt(index).mediaId != expectedMediaId
-                            ) {
-                                return@withContext
-                            }
-                            registerPreparedStream(ytFallback)
-                            stagePendingQuality(expectedMediaId, ytFallback)
-                            stagePendingQuality(track.mediaIdKey(), ytFallback)
-                            track.videoId?.let { stagePendingQuality(it, ytFallback) }
-                            publishResolvedQuality(ytFallback, expectedMediaId = expectedMediaId)
-                            applyDacRoutingFor(dacRateFor(ytFallback))
-                            logStreamEvent("queue-prepare-yt-fallback", ytFallback, retry = 0)
-                            cacheCurrentTrackStream(ytFallback)
-                            replaceMediaItemPreservingShuffle(index, track.toMediaItem(ytFallback))
-                            takeOverPlayback(index, expectedMediaId)
-                            enrichUpcomingQueue(index)
-                            extendDiscoverQueueIfNeeded(index)
-                            preloadNextQueueItem(index)
-                            scheduleQualityUpgrade(
-                                track = track,
-                                expectedMediaId = expectedMediaId,
-                                generation = generation,
-                                currentStream = ytFallback,
-                            )
-                        }
-                        return@launch
-                    }
-                }
                 withContext(Dispatchers.Main.immediate) {
                     if (generation == playRequestGeneration.get()) {
                         _state.update {
@@ -4471,15 +4409,18 @@ class MusicPlayer @Inject constructor(
                 }
 
                 val fallbackSeeds = existingTracks.takeLast(5).filter { !it.artist.equals(seed.artist, ignoreCase = true) }
-                val toAdd = fetchContextAwareRadioTracks(
-                    primarySeed = seed,
-                    fallbackSeeds = fallbackSeeds,
-                    knownVideoIds = existingVideoIds,
-                    knownKeys = existingKeys,
-                    knownCoreTitleArtists = knownCoreTitleArtists,
-                    knownCoreTitles = knownCoreTitles,
+                // Offline smart radio: build the endless queue from LOCAL tracks
+                // only (same album -> same artist -> shuffled rest). Zero network.
+                val localTracks = runCatching { downloadedTrackDao.get().getAllList() }.getOrDefault(emptyList())
+                val localPlayedKeys = existingTracks.mapTo(mutableSetOf()) {
+                    "${it.artist.trim().lowercase()}_${it.title.trim().lowercase()}"
+                }
+                val toAdd = LocalRadioGenerator.generate(
+                    seed = RadioSeed(title = seed.title, artist = seed.artist, album = seed.album.orEmpty()),
+                    candidates = localTracks,
+                    playedKeys = localPlayedKeys,
                     batchSize = RADIO_QUEUE_BATCH_SIZE,
-                )
+                ).map { it.toPlayableTrack() }
                 if (toAdd.isEmpty() || !radioQueueActive) return@launch
 
                 withContext(Dispatchers.Main.immediate) {
@@ -4558,15 +4499,16 @@ class MusicPlayer @Inject constructor(
                     .filter { !it.artist.equals(nextSeed.artist, ignoreCase = true) }
                     .distinctBy { it.artist.lowercase() }
 
-                val toAdd = fetchContextAwareRadioTracks(
-                    primarySeed = nextSeed,
-                    fallbackSeeds = fallbackSeeds,
-                    knownVideoIds = knownVideoIds,
-                    knownKeys = knownKeys,
-                    knownCoreTitleArtists = knownCoreTitleArtists,
-                    knownCoreTitles = knownCoreTitles,
+                val localTracks = runCatching { downloadedTrackDao.get().getAllList() }.getOrDefault(emptyList())
+                val localPlayedKeys = currentQueue.mapTo(mutableSetOf()) {
+                    "${it.artist.trim().lowercase()}_${it.title.trim().lowercase()}"
+                }
+                val toAdd = LocalRadioGenerator.generate(
+                    seed = RadioSeed(title = nextSeed.title, artist = nextSeed.artist, album = nextSeed.album.orEmpty()),
+                    candidates = localTracks,
+                    playedKeys = localPlayedKeys,
                     batchSize = RADIO_QUEUE_BATCH_SIZE,
-                )
+                ).map { it.toPlayableTrack() }
                 if (toAdd.isEmpty() || !radioQueueActive) return@launch
 
                 withContext(Dispatchers.Main.immediate) {
@@ -5013,6 +4955,7 @@ class MusicPlayer @Inject constructor(
         knownBitrate: Int? = null,
         fallbackMime: String? = null,
     ): ResolvedStream? {
+        // Local content:// and file paths resolve with zero network latency.
         val uri = if (targetUrl.startsWith("/") && !targetUrl.startsWith("file://")) {
             Uri.fromFile(File(targetUrl))
         } else {

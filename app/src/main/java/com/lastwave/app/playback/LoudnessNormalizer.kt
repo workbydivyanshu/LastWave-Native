@@ -28,6 +28,8 @@ private const val KEY_TRACK_GAIN = "REPLAYGAIN_TRACK_GAIN"
 private const val KEY_ALBUM_GAIN = "REPLAYGAIN_ALBUM_GAIN"
 private const val KEY_TRACK_PEAK = "REPLAYGAIN_TRACK_PEAK"
 private const val KEY_ALBUM_PEAK = "REPLAYGAIN_ALBUM_PEAK"
+private const val KEY_R128_TRACK_GAIN = "R128_TRACK_GAIN"
+private const val KEY_R128_ALBUM_GAIN = "R128_ALBUM_GAIN"
 
 /** Target level, in LUFS, normalization aims for. */
 const val LOUDNESS_TARGET_LUFS = -14f
@@ -110,8 +112,8 @@ object LoudnessNormalizer {
             }
         }
         return ReplayGainTags(
-            trackGainDb = parseDbString(normalized[KEY_TRACK_GAIN]),
-            albumGainDb = parseDbString(normalized[KEY_ALBUM_GAIN]),
+            trackGainDb = parseDbString(normalized[KEY_TRACK_GAIN]) ?: parseDbString(normalized[KEY_R128_TRACK_GAIN]),
+            albumGainDb = parseDbString(normalized[KEY_ALBUM_GAIN]) ?: parseDbString(normalized[KEY_R128_ALBUM_GAIN]),
             trackPeak = parsePeakString(normalized[KEY_TRACK_PEAK]),
             albumPeak = parsePeakString(normalized[KEY_ALBUM_PEAK]),
         )
