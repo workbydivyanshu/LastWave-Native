@@ -43,13 +43,10 @@ import com.lastwave.app.ui.common.adaptiveContentWidth
 import com.lastwave.app.ui.theme.ExpressivePillShape
 
 /**
- * YouTube Music-first onboarding.
+ * Account-free onboarding.
  *
- * First launch shows exactly two primary options:
- *  1. "Login with YouTube Music" — launches the existing YouTube Music web
- *     login flow (YouTubeLoginScreen / YtMusicAuthManager) to capture
- *     authentication cookies. Upon success the caller navigates to MainShell.
- *  2. "Continue as Guest" — persists guest mode (account-free) and enters
+ * First launch shows the primary option:
+ *  1. "Continue as Guest" — persists guest mode (account-free) and enters
  *     MainShell immediately with local-first recommendations.
  *
  * Last.fm is intentionally NOT part of this path anymore. It lives in
@@ -57,7 +54,6 @@ import com.lastwave.app.ui.theme.ExpressivePillShape
  */
 @Composable
 fun LoginScreen(
-    onLoginWithYouTube: () -> Unit,
     onContinueAsGuest: () -> Unit,
     onRestoreBackupAndSignIn: ((String) -> Unit)? = null,
     onDismissError: (() -> Unit)? = null,
@@ -111,30 +107,14 @@ fun LoginScreen(
                 }
                 Text("LastWave", style = MaterialTheme.typography.headlineMedium)
                 Text(
-                    "Your music, your way — powered by YouTube Music",
+                    "Your music, your way",
                     style = MaterialTheme.typography.bodyMedium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     textAlign = TextAlign.Center,
                 )
                 Spacer(Modifier.height(32.dp))
 
-                // 1. Primary: YouTube Music login.
-                Button(
-                    onClick = onLoginWithYouTube,
-                    enabled = !isBusy,
-                    shape = ExpressivePillShape,
-                    modifier = Modifier.fillMaxWidth().height(52.dp),
-                ) {
-                    Icon(
-                        Icons.Filled.PlayCircle,
-                        contentDescription = null,
-                        modifier = Modifier.padding(end = 8.dp),
-                    )
-                    Text("Login with YouTube Music")
-                }
-                Spacer(Modifier.height(12.dp))
-
-                // 2. Primary: Guest mode (account-free, local-first).
+                // Primary: Guest mode (account-free, local-first).
                 OutlinedButton(
                     onClick = onContinueAsGuest,
                     enabled = !isBusy,

@@ -30,8 +30,6 @@ import com.lastwave.app.ui.auth.AuthViewModel
 import com.lastwave.app.ui.auth.LoginScreen
 import com.lastwave.app.ui.settings.SettingsScreen
 import com.lastwave.app.ui.search.SearchScreen
-import com.lastwave.app.ui.discover.DiscoverScreen
-import com.lastwave.app.ui.genres.GenresScreen
 import com.lastwave.app.ui.shell.MainShell
 import com.lastwave.app.ui.common.PredictiveBackScreen
 import com.lastwave.app.ui.common.ExpressiveLoadingIndicator
@@ -142,20 +140,6 @@ fun LastWaveNavHost(
             appRouteBridge.routeNavigator.consumeRoute()
         }
     }
-    // "Explore this genre" from any track's context menu, anywhere in the
-    // app — Home, Discover, Playlist, Search — routes here since Genres
-    // is a pushed destination on THIS nav controller and none of those
-    // screens hold a reference to it. See GenreExplorer's doc comment.
-    val genreExplorerBridge: GenreExplorerNavBridge = hiltViewModel()
-    val pendingGenre by genreExplorerBridge.pendingGenre.collectAsStateWithLifecycle()
-    LaunchedEffect(pendingGenre) {
-        if (pendingGenre != null) {
-            navController.navigate(Screen.Genres.route) {
-                launchSingleTop = true
-            }
-        }
-    }
-
     val navBridge: ArtistAlbumNavBridge = hiltViewModel()
     LaunchedEffect(Unit) {
         navBridge.navigator.events.collect { target ->
@@ -231,9 +215,6 @@ fun LastWaveNavHost(
             val restoreError = (webAuthState as? com.lastwave.app.ui.auth.WebAuthState.Error)?.message
             val restoring = webAuthState == com.lastwave.app.ui.auth.WebAuthState.RestoringBackup
             LoginScreen(
-                onLoginWithYouTube = {
-                    navController.navigate(Screen.YouTubeLogin.route)
-                },
                 onContinueAsGuest = {
                     authViewModel.continueAsGuest()
                 },
@@ -259,8 +240,6 @@ fun LastWaveNavHost(
                     navController.navigate(Screen.Settings.route) { launchSingleTop = true }
                 },
                 onOpenSearch = { navController.navigate(Screen.Search.route) },
-                onOpenDiscover = { navController.navigate(Screen.Discover.route) },
-                onOpenGenres = { navController.navigate(Screen.Genres.route) },
                 onOpenFriends = { navController.navigate(Screen.Friends.route) },
                 onOpenFriendProfile = { username, displayName, avatarUrl ->
                     navController.navigate(Screen.FriendProfile.createRoute(username, displayName, avatarUrl))
@@ -273,9 +252,6 @@ fun LastWaveNavHost(
                 },
                 onOpenGenerator = {
                     navController.navigate(Screen.Create.route) { launchSingleTop = true }
-                },
-                onOpenNewReleases = {
-                    navController.navigate(Screen.NewReleases.route)
                 },
                 onOpenDownloads = {
                     navController.navigate(Screen.Downloads.route)
@@ -370,22 +346,6 @@ fun LastWaveNavHost(
         // onBack (its toolbar back button) still pops directly; the wrap
         // only adds the gesture-driven path, it doesn't replace the
         // button's.
-        composable(Screen.Genres.route) {
-            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
-                GenresScreen(
-                    onBack = { navController.popBackStack() },
-                    onNavigateToPlaylist = {
-                        navController.popBackStack()
-                        // Playlist tab already re-reads on resume (PlaylistViewModel's
-                        // LifecycleResumeEffect), so popping back to MainShell is
-                        // sufficient — no separate "switch tab" signal is needed here
-                        // since MainShell always shows Playlists as one of its tabs
-                        // and the user lands back wherever they left MainShell.
-                    },
-                )
-            }
-        }
-
         composable(Screen.Settings.route) {
             PredictiveBackScreen(onBack = { navController.popBackStack() }) {
                 SettingsScreen(
@@ -399,29 +359,7 @@ fun LastWaveNavHost(
                     onOpenModules = { navController.navigate(Screen.ProviderModules.route) },
                     onOpenHomeSections = { navController.navigate(Screen.HomeSections.route) },
                     onOpenExcludedSongs = { navController.navigate(Screen.ExcludedSongs.route) },
-                    onOpenYouTubeImport = { navController.navigate(Screen.YouTubeImport.route) },
-                    onOpenYouTubeLogin = { navController.navigate(Screen.YouTubeLogin.route) },
                     onOpenExternalImport = { navController.navigate(Screen.ExternalPlaylistImport.route) },
-                )
-            }
-        }
-
-        composable(Screen.YouTubeImport.route) {
-            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
-                com.lastwave.app.ui.settings.YouTubePlaylistImportScreen(
-                    onBack = { navController.popBackStack() },
-                    onImportSuccess = {
-                        navController.popBackStack()
-                    },
-                )
-            }
-        }
-
-        composable(Screen.YouTubeLogin.route) {
-            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
-                com.lastwave.app.ui.settings.YouTubeLoginScreen(
-                    onBack = { navController.popBackStack() },
-                    onConnected = { navController.popBackStack() },
                 )
             }
         }
@@ -475,20 +413,6 @@ fun LastWaveNavHost(
                     onOpenPlaylist = { playlistId ->
                         navController.navigate(Screen.FeedPlaylistDetail.createRoute(playlistId))
                     },
-                )
-            }
-        }
-
-        composable(Screen.Discover.route) {
-            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
-                DiscoverScreen(onBack = { navController.popBackStack() })
-            }
-        }
-
-        composable(Screen.NewReleases.route) {
-            PredictiveBackScreen(onBack = { navController.popBackStack() }) {
-                com.lastwave.app.ui.newreleases.NewReleasesScreen(
-                    onBack = { navController.popBackStack() },
                 )
             }
         }

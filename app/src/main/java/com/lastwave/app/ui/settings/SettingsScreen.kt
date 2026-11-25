@@ -420,8 +420,6 @@ fun SettingsScreen(
     onOpenModules: () -> Unit = {},
     onOpenHomeSections: () -> Unit = {},
     onOpenExcludedSongs: () -> Unit = {},
-    onOpenYouTubeImport: () -> Unit = {},
-    onOpenYouTubeLogin: () -> Unit = {},
     onOpenExternalImport: () -> Unit = {},
     viewModel: SettingsViewModel = hiltViewModel(),
 ) {
@@ -1313,7 +1311,7 @@ fun SettingsScreen(
                             it.authUserIndex == ytConnection.authUserIndex &&
                             it.pageId == ytConnection.pageId
                     }?.accountName ?: ytConnection.accountName
-                    val ytRowCount = if (ytConnected) 7 else 2
+                    val ytRowCount = if (ytConnected) 6 else 1
                     SettingsGroup(rowCount = ytRowCount) { index, position ->
                         when (index) {
                             0 -> if (ytConnected) {
@@ -1325,15 +1323,16 @@ fun SettingsScreen(
                                     isHighlighted = (highlightedSettingId == "youtube.account"),
                                 )
                             } else {
-                                SettingsActionCard(
+                                SettingsToggleCard(
                                     icon = Icons.Filled.CloudSync,
-                                    iconContainer = MaterialTheme.colorScheme.primaryContainer,
-                                    iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                    title = stringResource(R.string.settings_connect_yt),
-                                    subtitle = stringResource(R.string.settings_connect_yt_sub),
-                                    onClick = onOpenYouTubeLogin,
+                                    iconContainer = MaterialTheme.colorScheme.secondaryContainer,
+                                    iconTint = MaterialTheme.colorScheme.onSecondaryContainer,
+                                    title = stringResource(R.string.settings_yt_sync),
+                                    subtitle = syncSubtitle,
+                                    checked = ytConnected && ytSyncEnabled,
+                                    onCheckedChange = viewModel::setYtSyncEnabled,
                                     position = position,
-                                    isHighlighted = (highlightedSettingId == "youtube.account"),
+                                    isHighlighted = (highlightedSettingId == "youtube.sync"),
                                 )
                             }
                             1 -> SettingsToggleCard(
@@ -1379,17 +1378,6 @@ fun SettingsScreen(
                                     position = position,
                                     isHighlighted = (highlightedSettingId == "youtube.select_playlists"),
                                 )
-                            } else {
-                                SettingsActionCard(
-                                    icon = Icons.Filled.QueueMusic,
-                                    iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
-                                    iconTint = MaterialTheme.colorScheme.onTertiaryContainer,
-                                    title = "Import from YouTube Music",
-                                    subtitle = "Search, browse, or paste playlist links & IDs",
-                                    onClick = onOpenYouTubeImport,
-                                    position = position,
-                                    isHighlighted = (highlightedSettingId == "youtube.import"),
-                                )
                             }
                             4 -> if (ytConnected) {
                                 val shownCount = ytAccountPlaylists.count { it.id !in hiddenYtLibraryPlaylistIds }
@@ -1409,17 +1397,7 @@ fun SettingsScreen(
                                     isHighlighted = (highlightedSettingId == "youtube.shown_playlists"),
                                 )
                             }
-                            5 -> SettingsActionCard(
-                                icon = Icons.Filled.QueueMusic,
-                                iconContainer = MaterialTheme.colorScheme.primaryContainer,
-                                iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                title = stringResource(R.string.settings_make_local),
-                                subtitle = stringResource(R.string.settings_make_local_sub),
-                                onClick = onOpenYouTubeImport,
-                                position = position,
-                                isHighlighted = (highlightedSettingId == "youtube.import"),
-                            )
-                            6 -> if (ytConnected) {
+                            5 -> if (ytConnected) {
                                 SettingsToggleCard(
                                     icon = Icons.Filled.History,
                                     iconContainer = MaterialTheme.colorScheme.tertiaryContainer,
@@ -1535,19 +1513,9 @@ fun SettingsScreen(
                         item {
                             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                                 SectionLabel(stringResource(R.string.settings_section_imports))
-                                SettingsGroup(rowCount = 3) { index, position ->
+                                SettingsGroup(rowCount = 2) { index, position ->
                                     when (index) {
                                         0 -> SettingsActionCard(
-                                            icon = Icons.Filled.QueueMusic,
-                                            iconContainer = MaterialTheme.colorScheme.primaryContainer,
-                                            iconTint = MaterialTheme.colorScheme.onPrimaryContainer,
-                                            title = "Import from YouTube Music",
-                                            subtitle = "Search, browse, or paste playlist links & IDs",
-                                            onClick = onOpenYouTubeImport,
-                                            position = position,
-                                            isHighlighted = (highlightedSettingId == "library.import_yt"),
-                                        )
-                                        1 -> SettingsActionCard(
                                             icon = Icons.Filled.QueueMusic,
                                             iconContainer = MaterialTheme.colorScheme.secondaryContainer,
                                             iconTint = MaterialTheme.colorScheme.onSecondaryContainer,

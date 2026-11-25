@@ -173,7 +173,7 @@ data class MiscSettings(
     val canvasOverCellular: Boolean = true,
 )
 
-/** Toggleable sections of the Home tab (see FeedScreen). Hero greeting and
+/** Toggleable sections of the Home tab. Hero greeting and
  *  footer are structural; everything listed here can be hidden by the user.
  *  Titles are string resources so HomeSectionsScreen follows the app language. */
 enum class HomeSection(val id: String, val titleRes: Int, val subtitleRes: Int) {

@@ -18,8 +18,8 @@ import javax.inject.Singleton
  * per-request SAPISIDHASH Authorization header that InnerTube write endpoints
  * require (same scheme music.youtube.com itself uses in the browser).
  *
- * Cookies are captured by [com.lastwave.app.ui.settings.YouTubeLoginScreen]'s
- * WebView sign-in flow and persisted via [YtMusicPreferences].
+ * Cookies are captured by the YouTube Music WebView sign-in flow and
+ * persisted via [YtMusicPreferences].
  */
 @Singleton
 class YtMusicAuthManager @Inject constructor(

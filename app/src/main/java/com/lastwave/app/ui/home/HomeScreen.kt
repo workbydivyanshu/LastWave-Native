@@ -163,8 +163,6 @@ private val HeroInnerShape = RoundedCornerShape(24.dp)
 fun HomeScreen(
     onOpenSettings: () -> Unit,
     onOpenSearch: () -> Unit,
-    onOpenDiscover: () -> Unit,
-    onOpenGenres: () -> Unit,
     onOpenFriends: () -> Unit,
     onOpenDownloads: () -> Unit = {},
     viewModel: HomeViewModel = hiltViewModel(),
@@ -247,7 +245,6 @@ fun HomeScreen(
                     albumCount = stats.albumCount,
                     // Honest label: local Room aggregates are plays, not global scrobbles.
                     headlineLabel = if (uiState.isLocalStatsMode && !uiState.isViewingFriend) "Plays" else "Scrobbles",
-                    onOpenGenres = onOpenGenres,
                     modifier = Modifier.padding(start = 16.dp, end = 16.dp, top = 0.dp, bottom = 0.dp),
                 )
                 Spacer(Modifier.height(12.dp))
@@ -741,7 +738,6 @@ private fun StatsCard(
     trackCount: Long,
     artistCount: Long,
     albumCount: Long,
-    onOpenGenres: () -> Unit,
     modifier: Modifier = Modifier,
     headlineLabel: String = "Scrobbles",
 ) {
@@ -782,21 +778,6 @@ private fun StatsCard(
                                 style = MaterialTheme.typography.labelMedium,
                                 color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.75f),
                             )
-                        }
-                        Surface(
-                            shape = ExpressivePillShape,
-                            color = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(46.dp).align(Alignment.CenterEnd),
-                        ) {
-                            Box(contentAlignment = Alignment.Center) {
-                                IconButton(onClick = onOpenGenres) {
-                                    Icon(
-                                        Icons.AutoMirrored.Filled.ArrowForward,
-                                        contentDescription = "View genres",
-                                        tint = MaterialTheme.colorScheme.onPrimary,
-                                    )
-                                }
-                            }
                         }
                     }
                 }
