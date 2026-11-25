@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.selects.select
 import kotlinx.coroutines.withContext
 import kotlinx.coroutines.withTimeoutOrNull
+import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import javax.inject.Inject
 import javax.inject.Singleton
@@ -144,6 +145,44 @@ class LyricsRepository @Inject constructor(
                         if (ct != title || ca != artist) dao.findByTitleAndArtist(ct, ca) else null
                     }
             }.getOrNull()
+            // 1. LOCAL SIDECAR: a .lrc sitting next to the audio file is the
+            //    highest-priority offline tier, ahead of DB embedded/import
+            //    lyrics handled just below. Skipped for SAF content:// rows.
+            localTrack?.let { track ->
+                val sidecarPath = track.filePath.trim()
+                if (sidecarPath.isNotBlank() && !sidecarPath.startsWith("content://")) {
+                    val audioFile = File(sidecarPath)
+                    val parent = audioFile.parentFile
+                    if (parent != null) {
+                        val candidates = listOf(
+                            File(parent, audioFile.nameWithoutExtension + ".lrc"),
+                            File(parent, "${track.artist} - ${track.title}.lrc"),
+                        )
+                        val sidecarFile = candidates.firstOrNull { it.isFile && it.length() > 0 }
+                        if (sidecarFile != null) {
+                            val content = runCatching { sidecarFile.readText() }.getOrNull()
+                            if (!content.isNullOrBlank()) {
+                                val lines = parseLrc(content)
+                                if (lines.isNotEmpty()) {
+                                    val result = LyricsResult.Success(
+                                        lines = lines,
+                                        isSynced = true,
+                                        isWordSynced = lines.any { it.hasSyllables },
+                                        source = "Local Sidecar (LRC)",
+                                    )
+                                    if (!wordByWord) {
+                                        cache[cacheKey] = result
+                                        return@withContext result
+                                    }
+                                    localLyrics = result
+                                    onPartialResult(result)
+                                    return@run
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             if (localTrack != null && (localTrack.hasLyrics || !localTrack.plainLyrics.isNullOrBlank() || !localTrack.syncedLyrics.isNullOrBlank() || !localTrack.lrcFilePath.isNullOrBlank())) {
                 var synced = localTrack.syncedLyrics
                 if (synced.isNullOrBlank() && !localTrack.lrcFilePath.isNullOrBlank()) {

@@ -4,13 +4,17 @@ import com.lastwave.app.data.local.SessionPreferences
 import com.lastwave.app.data.network.LastFmApiService
 import com.lastwave.app.data.network.LastFmRateGuard
 import com.lastwave.app.data.network.LastFmSigner
+import com.lastwave.app.data.network.NetworkMonitor
 import android.os.SystemClock
 import java.io.IOException
-import java.util.concurrent.ConcurrentLinkedQueue
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.SharedFlow
@@ -31,7 +35,7 @@ import kotlinx.serialization.json.jsonObject
  *   instantly: the call waits out the shared [LastFmRateGuard] cooldown
  *   (bounded) and proceeds — the network layer's transparent retry usually
  *   resolves it before we even get here. If the wait budget expires, the
- *   scrobble is queued in [offlineQueue] and flushed automatically on the next
+ *   scrobble is queued in the durable [PendingScrobbleQueue] and flushed automatically on the next
  *   write; nothing is dropped.
  * - Backoff state lives in the shared guard (single source of truth for the
  *   whole process) and is adaptive with jitter — no more fixed 30s process-wide
@@ -44,7 +48,17 @@ class ScrobbleRepository @Inject constructor(
     private val api: LastFmApiService,
     private val sessionPreferences: SessionPreferences,
     private val rateGuard: LastFmRateGuard,
+    private val pendingQueue: PendingScrobbleQueue,
+    private val networkMonitor: NetworkMonitor,
 ) {
+    init {
+        CoroutineScope(SupervisorJob() + Dispatchers.IO).launch {
+            networkMonitor.isOnline.collect { online ->
+                if (online) runCatching { flushPendingScrobbles() }
+            }
+        }
+    }
+
     private val json = Json { ignoreUnknownKeys = true }
     private val callMutex = Mutex()
     private var lastWriteAtElapsed = 0L
@@ -52,14 +66,6 @@ class ScrobbleRepository @Inject constructor(
 
     private val _scrobbleEvents = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
     val scrobbleEvents: SharedFlow<Unit> = _scrobbleEvents.asSharedFlow()
-
-    private data class PendingScrobble(
-        val artist: String,
-        val track: String,
-        val album: String?,
-        val timestampSec: Long,
-    )
-    private val offlineQueue = ConcurrentLinkedQueue<PendingScrobble>()
 
     sealed interface Result {
         data object Success : Result
@@ -92,7 +98,7 @@ class ScrobbleRepository @Inject constructor(
         return result
     }
 
-    suspend fun scrobble(artist: String, track: String, album: String?, timestampSec: Long): Result {
+    suspend fun scrobble(artist: String, track: String, album: String?, timestampSec: Long, durationMs: Long = 0L): Result {
         // Try flushing any previously queued offline scrobbles first
         flushPendingScrobbles()
 
@@ -109,10 +115,8 @@ class ScrobbleRepository @Inject constructor(
         if (result is Result.Success) {
             _scrobbleEvents.tryEmit(Unit)
         } else if (result is Result.Failed && result.retryable) {
-            // Queue for automatic retry on the next write; bound the queue so a
-            // long offline period can't grow it without limit.
-            offlineQueue.add(PendingScrobble(artist, track, album, timestampSec))
-            while (offlineQueue.size > MAX_OFFLINE_QUEUE) offlineQueue.poll()
+            // Durable queue: survives process death and is bounded internally.
+            pendingQueue.enqueue(title = track, artist = artist, album = album, timestampSec = timestampSec, durationMs = durationMs)
         }
         return result
     }
@@ -128,27 +132,20 @@ class ScrobbleRepository @Inject constructor(
         )
 
     private suspend fun flushPendingScrobbles() {
-        if (offlineQueue.isEmpty()) return
-        // Don't burn the wait budget of the CURRENT scrobble on flushing old
-        // ones during an active cooldown — they'll flush after it clears.
+        if (pendingQueue.pending().isEmpty()) return
         if (rateGuard.cooldownRemainingMs > 0L) return
-        while (offlineQueue.isNotEmpty()) {
-            val pending = offlineQueue.peek() ?: break
+        pendingQueue.flush { pending ->
             val res = signedCall(
                 method = "track.scrobble",
                 extra = buildMap {
                     put("artist", pending.artist)
-                    put("track", pending.track)
+                    put("track", pending.title)
                     put("timestamp", pending.timestampSec.toString())
                     if (!pending.album.isNullOrBlank()) put("album", pending.album)
                 },
             )
-            if (res is Result.Success) {
-                offlineQueue.poll()
-                _scrobbleEvents.tryEmit(Unit)
-            } else {
-                break
-            }
+            if (res is Result.Success) _scrobbleEvents.tryEmit(Unit)
+            res is Result.Success
         }
     }
 
@@ -223,7 +220,5 @@ class ScrobbleRepository @Inject constructor(
 
         /** Minimum spacing between signed write requests. */
         const val WRITE_SPACING_MS = 700L
-
-        const val MAX_OFFLINE_QUEUE = 200
     }
 }

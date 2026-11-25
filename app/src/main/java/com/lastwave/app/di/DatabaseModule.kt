@@ -5,6 +5,7 @@ import androidx.room.Room
 import androidx.room.migration.Migration
 import com.lastwave.app.data.local.db.AppDatabase
 import com.lastwave.app.data.local.db.ArtworkCacheDao
+import com.lastwave.app.data.local.db.PendingScrobbleDao
 import com.lastwave.app.data.local.db.SavedPlaylistDao
 import com.lastwave.app.data.local.db.RecommendationExclusionDao
 import dagger.Module
@@ -269,6 +270,23 @@ object DatabaseModule {
         }
     }
 
+    private val migration14To15 = object : Migration(14, 15) {
+        override fun migrate(database: androidx.sqlite.db.SupportSQLiteDatabase) {
+            database.execSQL(
+                """
+                CREATE TABLE IF NOT EXISTS `pending_scrobbles` (
+                    `id` INTEGER PRIMARY KEY AUTOINCREMENT NOT NULL,
+                    `title` TEXT NOT NULL,
+                    `artist` TEXT NOT NULL,
+                    `album` TEXT,
+                    `timestampSec` INTEGER NOT NULL,
+                    `durationMs` INTEGER NOT NULL DEFAULT 0
+                )
+                """.trimIndent(),
+            )
+        }
+    }
+
     @Provides
     @Singleton
     fun provideAppDatabase(@ApplicationContext context: Context): AppDatabase =
@@ -289,6 +307,7 @@ object DatabaseModule {
                 migration11To12,
                 migration12To13,
                 migration13To14,
+                migration14To15,
             )
             .build()
 
@@ -314,4 +333,9 @@ object DatabaseModule {
     @Singleton
     fun provideSongPlayStatsDao(database: AppDatabase): com.lastwave.app.data.local.db.SongPlayStatsDao =
         database.songPlayStatsDao()
+
+    @Provides
+    @Singleton
+    fun providePendingScrobbleDao(database: AppDatabase): com.lastwave.app.data.local.db.PendingScrobbleDao =
+        database.pendingScrobbleDao()
 }

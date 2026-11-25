@@ -17,6 +17,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.shrinkVertically
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.filled.Download
 import androidx.compose.material.icons.filled.FormatSize
 import androidx.compose.material3.Slider
 import androidx.compose.runtime.derivedStateOf
@@ -97,6 +98,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.lastwave.app.data.local.LyricsAnimation
 import com.lastwave.app.data.lyrics.LyricLine
@@ -149,6 +151,7 @@ fun LyricsPanel(
     tertiaryColor: Color = MaterialTheme.colorScheme.tertiary,
 ) {
     val track = state.current ?: return
+    val saveViewModel: LyricsSaveViewModel = hiltViewModel()
     val liquidGlass = LocalLiquidGlass.current
 
     // High-frequency live progress stream
@@ -259,6 +262,9 @@ fun LyricsPanel(
             primaryColor = primaryColor,
             secondaryColor = secondaryColor,
             tertiaryColor = tertiaryColor,
+            onSaveLrc = if (state.current?.playbackUrl != null) {
+                { state.current?.let { saveViewModel.save(it, lyricsState) } }
+            } else null,
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(horizontal = 16.dp)
@@ -910,6 +916,7 @@ private fun LyricsPlaybackControls(
     isFullscreen: Boolean = false,
     lyricsOffsetMs: Long = 0L,
     onOpenLyricsOffset: (() -> Unit)? = null,
+    onSaveLrc: (() -> Unit)? = null,
     lyricsFontScale: Float = 1.0f,
     onLyricsFontScaleChange: (Float) -> Unit = {},
     primaryColor: Color = MaterialTheme.colorScheme.primary,
@@ -995,7 +1002,7 @@ private fun LyricsPlaybackControls(
             }
         }
 
-        if (onToggleFullscreen != null || onOpenLyricsOffset != null) {
+        if (onToggleFullscreen != null || onOpenLyricsOffset != null || onSaveLrc != null) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -1039,6 +1046,27 @@ private fun LyricsPlaybackControls(
                 }
 
                 Spacer(Modifier.width(10.dp))
+
+                if (onSaveLrc != null) {
+                    val saveInteraction = remember { MutableInteractionSource() }
+                    IconButton(
+                        onClick = onSaveLrc,
+                        interactionSource = saveInteraction,
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .liquidGlassChrome(CircleShape, LocalLiquidGlass.current, LiquidGlassPreset.FloatingControls, interactionSource = saveInteraction)
+                            .background(liquidGlassContainerColor(Color.White.copy(alpha = 0.14f))),
+                    ) {
+                        Icon(
+                            Icons.Filled.Download,
+                            contentDescription = "Save as .lrc",
+                            modifier = Modifier.size(22.dp),
+                            tint = Color.White.copy(alpha = 0.90f),
+                        )
+                    }
+                    Spacer(Modifier.width(10.dp))
+                }
 
                 if (onToggleFullscreen != null) {
                     val playerInteraction = remember { MutableInteractionSource() }
